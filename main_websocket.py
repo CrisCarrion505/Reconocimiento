@@ -18,7 +18,8 @@ def init_mediapipe():
             refine_landmarks=True,
             max_num_faces=1
         )
-
+print(mp.__file__)
+print(dir(mp))
 class MonitorExamen:
     def __init__(self):
         self.metrics = {
