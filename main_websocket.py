@@ -78,22 +78,22 @@ class MonitorExamen:
 
     def analizar_frame(self, frame):
         self.metrics["frames_procesados"] += 1
-        
+    
         # Convertir a RGB y MediaPipe Image
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
 
-        # Procesar con FaceLandmarker
-        results = face_landmarker.detect(mp_image)
+        # ✅ CORREGIDO: VIDEO MODE necesita detect_for_video + timestamp
+        import time
+        timestamp_ms = int(time.time() * 1000)
+        results = face_landmarker.detect_for_video(mp_image, timestamp_ms)
 
         if not results.face_landmarks:
             self.metrics["rostros_perdidos"] += 1
             return {"status": "rostro_perdido", **self.metrics}
 
         self.metrics["rostros_detectados"] += 1
-
-        # Extraer landmarks (mismo índice que FaceMesh)
-        landmarks = results.face_landmarks[0]  # Lista de NormalizedLandmark
+        landmarks = results.face_landmarks[0]
         
         yaw = self.calcular_yaw(landmarks)
         self.yaw_history.append(yaw)
