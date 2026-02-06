@@ -128,12 +128,124 @@ async def websocket_examen(websocket: WebSocket, examen_id: str):
 @app.get("/")
 async def get():
     return HTMLResponse("""
-    <h1>WebSocket Test - Monitor Examen</h1>
-    <button onclick="testWebSocket()">Probar WebSocket</button>
-    <script>
-        async function testWebSocket() {
-            const ws = new WebSocket('ws://localhost:8000/ws/examen/123');
-            ws.onmessage = (event) => console.log(JSON.parse(event.data));
-        }
-    </script>
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Monitor Examen - Webcam Test</title>
+        <style>
+            video, canvas { border: 2px solid #333; margin: 10px; }
+            #status { font-weight: bold; padding: 10px; margin: 10px; border-radius: 5px; }
+            .ok { background: #d4edda; color: #155724; }
+            .warning { background: #fff3cd; color: #856404; }
+            .error { background: #f8d7da; color: #721c24; }
+        </style>
+    </head>
+    <body>
+        <h1>🧑‍💻 Monitor Examen - Webcam + WebSocket</h1>
+        
+        <div>
+            <video id="webcam" width="640" height="480" autoplay muted></video>
+            <canvas id="canvas" width="640" height="480" style="display:none;"></canvas>
+        </div>
+        
+        <div id="status">🔴 Desconectado - Click "INICIAR EXAMEN"</div>
+        
+        <div>
+            <button onclick="iniciarExamen()">🚀 INICIAR EXAMEN</button>
+            <button onclick="detenerExamen()">⏹️ DETENER EXAMEN</button>
+        </div>
+        
+        <div id="metrics"></div>
+        
+        <script>
+            let ws = null;
+            let stream = null;
+            let examenId = 'test-123';
+            const statusEl = document.getElementById('status');
+            const metricsEl = document.getElementById('metrics');
+            const video = document.getElementById('webcam');
+            const canvas = document.getElementById('canvas');
+            const ctx = canvas.getContext('2d');
+
+            async function iniciarExamen() {
+                try {
+                    // 1. Pedir permisos webcam
+                    stream = await navigator.mediaDevices.getUserMedia({
+                        video: { width: 640, height: 480 }
+                    });
+                    video.srcObject = stream;
+
+                    // 2. Conectar WebSocket
+                    const url = `wss://reconocimiento-1.onrender.com/ws/examen/${examenId}`;
+                    ws = new WebSocket(url);
+                    
+                    ws.onopen = () => {
+                        statusEl.textContent = '🟢 CONECTADO - Enviando frames...';
+                        statusEl.className = 'ok';
+                        enviarFrames();
+                    };
+
+                    ws.onmessage = (event) => {
+                        const data = JSON.parse(event.data);
+                        mostrarMetrics(data);
+                    };
+
+                    ws.onerror = () => {
+                        statusEl.textContent = '🔴 ERROR WebSocket';
+                        statusEl.className = 'error';
+                    };
+
+                } catch(err) {
+                    statusEl.textContent = '❌ Error: ' + err.message;
+                    statusEl.className = 'error';
+                }
+            }
+
+            function enviarFrames() {
+                if (!ws || ws.readyState !== WebSocket.OPEN || !stream) return;
+
+                ctx.drawImage(video, 0, 0, 640, 480);
+                canvas.toBlob((blob) => {
+                    blob.arrayBuffer().then(buffer => {
+                        ws.send(buffer);
+                    });
+                }, 'image/jpeg', 0.8);
+
+                // 10 FPS
+                setTimeout(enviarFrames, 100);
+            }
+
+            function mostrarMetrics(data) {
+                const yaw = data.yaw?.toFixed(3) || 'N/A';
+                const status = data.status || 'unknown';
+                
+                let color = 'ok';
+                let emoji = '🟢';
+                if (status === 'rostro_perdido') {
+                    color = 'warning';
+                    emoji = '🟡';
+                }
+                
+                metricsEl.innerHTML = `
+                    <div style="margin:10px;">
+                        <strong>${emoji} Status:</strong> ${status}<br>
+                        <strong>Yaw:</strong> ${yaw}<br>
+                        <strong>Frames:</strong> ${data.frames_procesados || 0}<br>
+                        <strong>Rostros:</strong> ${data.rostros_detectados || 0} / ${data.rostros_perdidos || 0}<br>
+                        <strong>Desvíos:</strong> ${data.desvios_mirada || 0}
+                    </div>
+                `;
+            }
+
+            function detenerExamen() {
+                if (ws) ws.close();
+                if (stream) stream.getTracks().forEach(track => track.stop());
+                statusEl.textContent = '🔴 Desconectado';
+                statusEl.className = '';
+                metricsEl.innerHTML = '';
+            }
+        </script>
+    </body>
+    </html>
     """)
+
