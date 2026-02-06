@@ -5,21 +5,36 @@ import numpy as np
 import mediapipe as mp
 from collections import deque
 from datetime import datetime
+import base64
 
-app = FastAPI(title="Monitor Examen WebSocket")  # ✅ te faltaba esto
+app = FastAPI(title="Monitor Examen WebSocket")
 
-mp_face_mesh = mp.solutions.face_mesh
-face_mesh = None
+# ✅ NUEVO: MediaPipe Tasks
+BaseOptions = mp.tasks.BaseOptions
+FaceLandmarker = mp.tasks.vision.FaceLandmarker
+FaceLandmarkerOptions = mp.tasks.vision.FaceLandmarkerOptions
+VisionRunningMode = mp.tasks.vision.RunningMode
+FaceLandmarkerResult = mp.tasks.vision.FaceLandmarkerResult
+Image = mp.Image
+
+face_landmarker = None
 
 def init_mediapipe():
-    global face_mesh
-    if face_mesh is None:
-        face_mesh = mp_face_mesh.FaceMesh(
-            refine_landmarks=True,
-            max_num_faces=1
+    global face_landmarker
+    if face_landmarker is None:
+        # Necesitas descargar: https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task
+        # Y subirlo a tu repo en /app/models/face_landmarker.task
+        model_path = "/app/models/face_landmarker.task"  
+        
+        options = FaceLandmarkerOptions(
+            base_options=BaseOptions(model_asset_path=model_path),
+            running_mode=VisionRunningMode.VIDEO,  # Para stream continuo
+            num_faces=1,
+            output_face_blendshapes=False,
+            output_facial_transformation_matrixes=False
         )
-print(mp.__file__)
-print(dir(mp))
+        face_landmarker = FaceLandmarker.create_from_options(options)
+
 class MonitorExamen:
     def __init__(self):
         self.metrics = {
@@ -34,6 +49,7 @@ class MonitorExamen:
 
     async def procesar_stream(self, websocket: WebSocket):
         self.inicio_examen = datetime.now()
+        init_mediapipe()  # Inicializa antes del loop
 
         try:
             while True:
@@ -42,7 +58,6 @@ class MonitorExamen:
                 frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
                 resultado = self.analizar_frame(frame)
-
                 await websocket.send_json(resultado)
 
         except WebSocketDisconnect:
@@ -50,20 +65,24 @@ class MonitorExamen:
             print("Examen terminado:", self.metrics)
 
     def analizar_frame(self, frame):
-        init_mediapipe()  # ✅ obligatorio antes de usar face_mesh
-
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        results = face_mesh.process(rgb)
-
         self.metrics["frames_procesados"] += 1
+        
+        # Convertir a RGB y MediaPipe Image
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
 
-        if not results.multi_face_landmarks:
+        # Procesar con FaceLandmarker
+        results = face_landmarker.detect(mp_image)
+
+        if not results.face_landmarks:
             self.metrics["rostros_perdidos"] += 1
             return {"status": "rostro_perdido", **self.metrics}
 
         self.metrics["rostros_detectados"] += 1
 
-        landmarks = results.multi_face_landmarks[0]
+        # Extraer landmarks (mismo índice que FaceMesh)
+        landmarks = results.face_landmarks[0]  # Lista de NormalizedLandmark
+        
         yaw = self.calcular_yaw(landmarks)
         self.yaw_history.append(yaw)
 
@@ -77,14 +96,15 @@ class MonitorExamen:
         return {
             "status": "ok",
             "yaw": yaw,
-            "desviacion": desviacion,
+            "desvacion": desviacion,
             **self.metrics
         }
 
     def calcular_yaw(self, landmarks):
-        nose_tip = landmarks.landmark[1]
-        left_eye = landmarks.landmark[33]
-        right_eye = landmarks.landmark[362]
+        # Mismos índices que FaceMesh: nose_tip=1, left_eye=33, right_eye=362
+        nose_tip = landmarks[1]
+        left_eye = landmarks[33]
+        right_eye = landmarks[362]
 
         eye_vector_x = right_eye.x - left_eye.x
         nose_vector_x = nose_tip.x - (left_eye.x + right_eye.x) / 2
@@ -94,10 +114,10 @@ class MonitorExamen:
 
 @app.websocket("/ws/examen/{examen_id}")
 async def websocket_examen(websocket: WebSocket, examen_id: str):
-    await websocket.accept()  # ✅ obligatorio
+    await websocket.accept()
     print(f"Examen {examen_id} iniciado")
 
-    monitor = MonitorExamen()  # ✅ uno por conexión/estudiante
+    monitor = MonitorExamen()
     await monitor.procesar_stream(websocket)
 
 @app.get("/")
