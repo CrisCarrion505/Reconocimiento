@@ -7,14 +7,22 @@ from collections import deque
 from datetime import datetime
 import base64
 
+# BORRA TODO y pega ESTO (código migrado que te di):
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse
+import cv2
+import numpy as np
+import mediapipe as mp
+from collections import deque
+from datetime import datetime
+
 app = FastAPI(title="Monitor Examen WebSocket")
 
-# ✅ NUEVO: MediaPipe Tasks
+# ✅ IMPORTS NUEVOS (MediaPipe Tasks) - REEMPLAZA línea 11
 BaseOptions = mp.tasks.BaseOptions
 FaceLandmarker = mp.tasks.vision.FaceLandmarker
 FaceLandmarkerOptions = mp.tasks.vision.FaceLandmarkerOptions
 VisionRunningMode = mp.tasks.vision.RunningMode
-FaceLandmarkerResult = mp.tasks.vision.FaceLandmarkerResult
 Image = mp.Image
 
 face_landmarker = None
@@ -22,18 +30,15 @@ face_landmarker = None
 def init_mediapipe():
     global face_landmarker
     if face_landmarker is None:
-        # Necesitas descargar: https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task
-        # Y subirlo a tu repo en /app/models/face_landmarker.task
-        model_path = "/app/models/face_landmarker.task"  
-        
+        model_path = "/app/models/face_landmarker.task"
         options = FaceLandmarkerOptions(
             base_options=BaseOptions(model_asset_path=model_path),
-            running_mode=VisionRunningMode.VIDEO,  # Para stream continuo
-            num_faces=1,
-            output_face_blendshapes=False,
-            output_facial_transformation_matrixes=False
+            running_mode=VisionRunningMode.VIDEO,
+            num_faces=1
         )
         face_landmarker = FaceLandmarker.create_from_options(options)
+
+
 
 class MonitorExamen:
     def __init__(self):
